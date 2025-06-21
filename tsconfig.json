@@ -8,12 +8,24 @@
     "target": "ES2022",
     "strict": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "declaration": true,
+    "sourceMap": false,
+    "downlevelIteration": true,
+    "useDefineForClassFields": true,
+    "allowImportingTsExtensions": false
   },
   "include": [
-    "./**/*.ts"
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }

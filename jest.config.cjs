@@ -14,14 +14,20 @@ module.exports = {
   ],
   verbose: true,
   transform: {
-    '^.+\\.ts$': 'ts-jest',
+    '^.+\\.ts$': ['ts-jest', {
+      tsconfig: {
+        module: 'commonjs',
+        target: 'es2020'
+      }
+    }],
   },
   moduleFileExtensions: ['ts', 'js', 'json'],
   moduleNameMapper: {
-    '^fastmcp$': '<rootDir>/src/__tests__/jest.setup.js',
+    '^fastmcp$': '<rootDir>/src/__tests__/jest.setup.ts',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(fastmcp|@modelcontextprotocol)/)',
   ],
-  setupFilesAfterEnv: ['<rootDir>/src/__tests__/jest.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/src/__tests__/jest.setup.ts'],
 };

@@ -201,7 +201,7 @@ describe('Security Module', () => {
       });
 
       await expect(validatePath(newFilePath)).rejects.toThrow(
-        'Access denied - parent directory outside allowed directories'
+        'Access denied - path outside allowed directories'
       );
     });
 

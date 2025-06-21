@@ -15,7 +15,12 @@ src/
 └── tools/
     ├── filesystem.ts          # File and directory manipulation tools
     ├── process.ts             # System process management tools
-    └── terminal.ts            # Command execution and session management tools
+    ├── terminal.ts            # Command execution and session management tools
+    ├── package-management.ts  # npm and Python package management tools
+    ├── network-api.ts         # Network connectivity and API testing tools
+    ├── code-analysis.ts       # Code linting, formatting, and analysis tools
+    ├── file-monitoring.ts     # File watching and change tracking tools
+    └── testing.ts             # Test execution and coverage analysis tools
 ```
 
 ## Core Components
@@ -51,6 +56,20 @@ src/
 │  │  │- Search     │  │- monitoring │  │- sessions   │  │
 │  │  │- Edit/Copy  │  │- lifecycle  │  │- mgmt       │  │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │  │package-mgmt │  │network-api │  │code-analysis│  │
+│  │  │- npm tools  │  │- port check │  │- linting    │  │
+│  │  │- pip tools  │  │- http req   │  │- formatting │  │
+│  │  │- deps audit │  │- localhost  │  │- metrics    │  │
+│  │  │- security   │  │- ping/dns   │  │- duplicates │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  │
+│  │  ┌─────────────┐  ┌─────────────┐                  │
+│  │  │file-monitor │  │testing.ts  │                  │
+│  │  │- watch files│  │- run tests  │                  │
+│  │  │- tail logs  │  │- coverage   │                  │
+│  │  │- dir watch  │  │- continuous │                  │
+│  │  │- file diff  │  │- benchmark  │                  │
+│  │  └─────────────┘  └─────────────┘                  │
 │  └─────────────────────────────────────────────────┘  │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐  │
@@ -125,6 +144,41 @@ await server.start({ transportType: "stdio" });
 - **Output Streaming**: read_output with real-time buffer management
 - **Session Control**: list_sessions and force_terminate with cleanup
 - **Code Search Integration**: search_code with ripgrep integration
+
+**package-management.ts**: npm and Python package management
+- **npm Operations**: npm_install, npm_scripts, npm_audit, npm_outdated
+- **Python Package Management**: pip_install with virtual environment support
+- **Dependency Analysis**: dependency_info with security transparency
+- **Security Auditing**: Vulnerability scanning and update management
+- **Lock File Management**: Automatic dependency resolution and validation
+
+**network-api.ts**: Network connectivity and API testing
+- **Port Management**: check_port for service discovery
+- **HTTP Operations**: http_request for API testing and development
+- **Service Discovery**: localhost_services for development environment
+- **Network Diagnostics**: ping_host and dns_lookup for troubleshooting
+- **Security Boundaries**: Validates endpoints and prevents abuse
+
+**code-analysis.ts**: Code quality and analysis tools
+- **Code Linting**: lint_code with ESLint, Pylint, and auto-fix capabilities
+- **Code Formatting**: format_code with Prettier, Black, and language-specific formatters
+- **Metrics Analysis**: code_metrics for complexity and maintainability assessment
+- **Duplicate Detection**: find_duplicates for code quality improvement
+- **Type Checking**: type_check for TypeScript/mypy validation
+
+**file-monitoring.ts**: Real-time file and directory monitoring
+- **File Watching**: watch_files with pattern matching and notifications
+- **Log Monitoring**: tail_logs with filtering and real-time updates
+- **Directory Tracking**: directory_watch for comprehensive change detection
+- **Content Comparison**: file_diff for change analysis and tracking
+- **Resource Management**: Efficient monitoring with usage limits
+
+**testing.ts**: Test execution and performance analysis
+- **Test Execution**: run_tests with comprehensive framework support
+- **Coverage Analysis**: test_coverage with multiple output formats
+- **Continuous Testing**: test_watch with file monitoring integration
+- **Performance Testing**: benchmark for optimization and profiling
+- **Framework Integration**: Jest, pytest, and auto-detection capabilities
 
 ### 4. FastMCP Framework Integration
 
@@ -222,6 +276,40 @@ server.addTool({
 - `list_sessions`: Active session enumeration with state tracking
 - `force_terminate`: Session cleanup with proper resource management
 - `search_code`: Content searching with ripgrep integration
+
+**Package Management Tools (package-management.ts):**
+- `npm_install`: Dependency installation with lock file management
+- `npm_scripts`: Script execution with output streaming
+- `npm_audit`: Security vulnerability scanning
+- `npm_outdated`: Package update checking
+- `pip_install`: Python package installation with virtual environment support
+- `dependency_info`: Comprehensive package metadata analysis
+
+**Network & API Tools (network-api.ts):**
+- `check_port`: Port service discovery and status checking
+- `http_request`: HTTP request execution for API testing
+- `localhost_services`: Local development server detection
+- `ping_host`: Network connectivity testing
+- `dns_lookup`: DNS resolution and troubleshooting
+
+**Code Analysis Tools (code-analysis.ts):**
+- `lint_code`: Code quality analysis with multiple linters
+- `format_code`: Code formatting with language-specific tools
+- `code_metrics`: Complexity and maintainability analysis
+- `find_duplicates`: Copy-paste detection and structural analysis
+- `type_check`: TypeScript/mypy type validation
+
+**File Monitoring Tools (file-monitoring.ts):**
+- `watch_files`: Real-time file change monitoring with patterns
+- `tail_logs`: Log file monitoring with filtering
+- `directory_watch`: Comprehensive directory change tracking
+- `file_diff`: File content comparison and change analysis
+
+**Testing Tools (testing.ts):**
+- `run_tests`: Test suite execution with framework support
+- `test_coverage`: Code coverage analysis and reporting
+- `test_watch`: Continuous testing with file monitoring
+- `benchmark`: Performance testing and profiling
 
 **Resource Templates:**
 - `file://{path}`: Direct file content access through MCP resource interface
@@ -386,6 +474,211 @@ npm run test:terminal
 - Shared utility testing with comprehensive coverage
 - Module isolation for focused debugging and development
 - Comprehensive error reporting with module context
+
+## Adding New Tool Categories
+
+The modular architecture makes it easy to add new tool categories. Follow this comprehensive guide:
+
+### 1. Create New Tool Category File
+
+Create a new file in `src/tools/` following the naming convention `[category-name].ts`:
+
+```typescript
+// src/tools/new-category.ts
+import { FastMCP } from "fastmcp";
+import { z } from "zod";
+import { validatePath } from "../utils/security.js";
+import { getPathFromOptions } from "../utils/path-helpers.js";
+
+/**
+ * Register all tools for the new category
+ */
+export function registerNewCategoryTools(server: FastMCP): void {
+  // Add your tools here using server.addTool()
+}
+```
+
+### 2. Implement Individual Tools
+
+Follow the FastMCP pattern for each tool:
+
+```typescript
+server.addTool({
+  name: "tool_name",
+  description: `
+    Comprehensive tool description with contracts.
+    
+    PRECONDITIONS:
+    - Input validation requirements
+    - Security boundary conditions
+    
+    POSTCONDITIONS:
+    - Expected output guarantees
+    - System state changes
+    
+    INVARIANTS:
+    - Properties that remain unchanged
+  `,
+  parameters: z.object({
+    // Define parameters using Zod schemas
+    path: z.string().min(1, "Path must not be empty"),
+    optional_param: z.boolean().optional(),
+  }),
+  execute: async (args, { log }) => {
+    try {
+      // DEFENSIVE PROGRAMMING: Input validation
+      const validPath = await validatePath(args.path);
+      
+      // TYPE-DRIVEN DEVELOPMENT: Runtime type checking
+      if (!validPath) {
+        throw new UserError("Invalid path provided");
+      }
+      
+      // IMMUTABILITY: Pure function implementation
+      const result = await performOperation(validPath);
+      
+      // CONTRACT: Postcondition verification
+      if (!result.success) {
+        throw new UserError("Operation failed to meet postconditions");
+      }
+      
+      log.info("Operation completed successfully", { path: args.path });
+      return result.data;
+      
+    } catch (error) {
+      log.error("Tool execution failed", { error: error.message });
+      throw error instanceof UserError ? error : new UserError(`Operation failed: ${error.message}`);
+    }
+  },
+});
+```
+
+### 3. Register in Main Server
+
+Add the import and registration in `src/index.ts`:
+
+```typescript
+// Add import
+import { registerNewCategoryTools } from "./tools/new-category.js";
+
+// Add to registerAllTools function
+async function registerAllTools(server: FastMCP): Promise<void> {
+  console.error("🔧 Registering modular tool categories...");
+  
+  try {
+    // Existing registrations...
+    registerFilesystemTools(server);
+    registerProcessTools(server);
+    registerTerminalTools(server);
+    
+    // Add your new category
+    console.error("  🆕 Registering new category tools...");
+    registerNewCategoryTools(server);
+    
+    console.error("✅ All tool categories registered successfully");
+  } catch (error) {
+    console.error("❌ CRITICAL: Tool registration failed:", error);
+    throw error;
+  }
+}
+```
+
+### 4. Add Testing Support
+
+Update `package.json` to include test scripts for your new category:
+
+```json
+{
+  "scripts": {
+    "test:new-category": "jest --testPathPattern=new-category"
+  }
+}
+```
+
+Create test files in `src/__tests__/tools/new-category.test.ts`:
+
+```typescript
+// src/__tests__/tools/new-category.test.ts
+import { describe, test, expect } from '@jest/globals';
+import { FastMCP } from 'fastmcp';
+import { registerNewCategoryTools } from '../../tools/new-category.js';
+
+describe('New Category Tools', () => {
+  let server: FastMCP;
+  
+  beforeEach(() => {
+    server = new FastMCP({ name: 'test', version: '1.0.0' });
+    registerNewCategoryTools(server);
+  });
+  
+  test('should register tools successfully', () => {
+    // Test tool registration
+  });
+  
+  test('should validate inputs correctly', async () => {
+    // Test input validation
+  });
+  
+  test('should handle errors gracefully', async () => {
+    // Test error handling
+  });
+});
+```
+
+### 5. Update Documentation
+
+Update the following files to reflect your new tools:
+
+1. **README.md**: Add tool descriptions in the API section
+2. **ARCHITECTURE.md**: Update the modular architecture diagram and tool listings
+3. **package.json**: Add test scripts
+4. Add any necessary dependencies
+
+### 6. Advanced Programming Technique Integration
+
+Ensure your tools follow the established patterns:
+
+**Design by Contract:**
+- Document preconditions, postconditions, and invariants
+- Include runtime assertion checking for critical operations
+- Verify contract compliance in tests
+
+**Defensive Programming:**
+- Multi-layer input validation using Zod schemas
+- Security boundary enforcement with `validatePath()`
+- Comprehensive error handling with `UserError`
+
+**Type-Driven Development:**
+- Use branded types for domain modeling
+- Runtime type checking with Zod refinements
+- Comprehensive type guards
+
+**Immutability Patterns:**
+- Pure function implementations where possible
+- Immutable data structures
+- Functional composition patterns
+
+**Property-Based Testing:**
+- Postcondition verification
+- Invariant checking
+- Edge case handling
+
+### 7. Security Considerations
+
+Always include security measures:
+
+- **Path Validation**: Use `validatePath()` for all file operations
+- **Input Sanitization**: Validate and sanitize all user inputs
+- **Resource Limits**: Implement appropriate timeouts and resource constraints
+- **Error Messages**: Provide helpful but not revealing error messages
+- **Logging**: Include appropriate logging for security monitoring
+
+### 8. Performance Guidelines
+
+- **Async Operations**: Use proper async/await patterns
+- **Resource Management**: Clean up resources appropriately
+- **Caching**: Implement caching where beneficial
+- **Monitoring**: Include performance logging and metrics
 
 ## Deployment
 

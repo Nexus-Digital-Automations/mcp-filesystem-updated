@@ -1,7 +1,7 @@
 // src/utils/security.ts
-import fs from "fs/promises";
-import path from "path";
-import os from 'os';
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from 'os';
 import { UserError } from "fastmcp";
 
 /**
@@ -107,7 +107,7 @@ export const allowedDirectories = args.map(dir => {
         process.exit(1);
       }
     } catch (error) {
-      console.error(`Error accessing allowed directory "${dir}":`, error);
+      console.error(`Error accessing allowed directory "${dir}": ${error instanceof Error ? error.message : error}`);
       process.exit(1);
     }
   }
@@ -167,26 +167,27 @@ export async function validatePath(requestedPath: string): Promise<string> {
     throw new UserError(`Path resolution failed: ${errorMessage}`);
   }
 
-  // SECURITY BOUNDARY: Layer 3 - Allowed directory validation
-  const isAllowed = allowedDirectories.some(dir => {
+  // SECURITY BOUNDARY: Early boundary check before any filesystem operations
+  const isPathWithinBoundaries = allowedDirectories.some(dir => {
     const normalizedDir = normalizePath(dir);
-    return normalizedPath.startsWith(normalizedDir);
+    return normalizedPath.startsWith(normalizedDir + path.sep) || normalizedPath === normalizedDir;
   });
-  
-  if (!isAllowed) {
+
+  if (!isPathWithinBoundaries) {
     throw new UserError(
       `Access denied - path outside allowed directories: ${absolutePath} not in [${allowedDirectories.join(', ')}]`
     );
   }
 
-  // SECURITY BOUNDARY: Layer 4 - Symlink resolution and re-validation
+  // SECURITY BOUNDARY: Layer 3 & 4 - Try symlink resolution for existing files
   try {
     const realPath = await fs.realpath(absolutePath);
     const normalizedReal = normalizePath(realPath);
     
+    // Double-check that symlink target is still within allowed directories
     const isRealPathAllowed = allowedDirectories.some(dir => {
       const normalizedDir = normalizePath(dir);
-      return normalizedReal.startsWith(normalizedDir);
+      return normalizedReal.startsWith(normalizedDir + path.sep) || normalizedReal === normalizedDir;
     });
     
     if (!isRealPathAllowed) {
@@ -201,7 +202,7 @@ export async function validatePath(requestedPath: string): Promise<string> {
     return realPath;
     
   } catch (error: any) {
-    // SECURITY BOUNDARY: Layer 5 - Parent directory validation for new files
+    // SECURITY BOUNDARY: Layer 5 - Handle file creation (ENOENT case)
     if (error.code === 'ENOENT') {
       const parentDir = path.dirname(absolutePath);
       
@@ -211,7 +212,7 @@ export async function validatePath(requestedPath: string): Promise<string> {
         
         const isParentAllowed = allowedDirectories.some(dir => {
           const normalizedDir = normalizePath(dir);
-          return normalizedParent.startsWith(normalizedDir);
+          return normalizedParent.startsWith(normalizedDir + path.sep) || normalizedParent === normalizedDir;
         });
         
         if (!isParentAllowed) {
@@ -238,7 +239,8 @@ export async function validatePath(requestedPath: string): Promise<string> {
       throw error;
     }
     
-    // Wrap other errors in UserError for consistent error handling
+    // For other filesystem errors, propagate them as validation failures
+    // since they indicate real issues accessing the file
     const errorMessage = error instanceof Error ? error.message : 'Unknown filesystem error';
     throw new UserError(`Path validation failed: ${errorMessage}`);
   }

@@ -9,6 +9,11 @@
 - **Process Management**: System process listing, monitoring, and termination capabilities  
 - **Terminal Integration**: Command execution with session management and output streaming
 - **Content Search**: Advanced file and code content searching with ripgrep integration
+- **🔧 Package Management**: Dependency installation, auditing, and update management for npm and Python packages
+- **🌐 Network & API**: Port checking, HTTP requests, service discovery, and network connectivity testing
+- **🔍 Code Analysis**: Linting, formatting, complexity analysis, duplicate detection, and type checking
+- **📁 File Monitoring**: Real-time file watching, log tailing, and directory change tracking
+- **🧪 Testing**: Test execution, coverage reports, continuous testing, and performance benchmarking
 
 ### Core Filesystem Operations
 - Read multiple files simultaneously with comprehensive error handling
@@ -53,14 +58,19 @@ src/
 └── tools/
     ├── filesystem.ts          # File and directory manipulation tools
     ├── process.ts             # System process management tools
-    └── terminal.ts            # Command execution and session management tools
+    ├── terminal.ts            # Command execution and session management tools
+    ├── package-management.ts  # npm and Python package management tools
+    ├── network-api.ts         # Network connectivity and API testing tools
+    ├── code-analysis.ts       # Code linting, formatting, and analysis tools
+    ├── file-monitoring.ts     # File watching and change tracking tools
+    └── testing.ts             # Test execution and coverage analysis tools
 ```
 
 - **Clean Separation**: Organized into filesystem, process, and terminal tool categories
 - **Reusable Utilities**: Shared security validation and path handling utilities
 - **Maintainable Codebase**: Logical organization following enterprise software patterns
 - **Scalable Design**: Easy addition of new tool categories and functionality
-- **22 Total Tools**: Comprehensive toolset across all categories with advanced programming techniques
+- **45+ Total Tools**: Comprehensive toolset across all categories with advanced programming techniques
 
 ### Enterprise-Grade Security
 - **Triple Path Validation**: Defense-in-depth security validation
@@ -188,10 +198,22 @@ src/
   - Security: Commands executed within allowed directory context
 
 - **read_output**
-  - Read output from running terminal sessions
-  - Input: `pid` (number, required): Session process ID
-  - Returns current output buffer from the session
-  - Security: Read-only access to session output
+  - Read output from running terminal sessions with optional search functionality
+  - Inputs:
+    - `pid` (number, required): Session process ID to read output from
+    - `search_pattern` (string, optional): Text or regex pattern to search for in output
+    - `is_regex` (boolean, optional): Set to true if search_pattern is a regular expression (default: false)
+    - `case_sensitive` (boolean, optional): Set to true for case-sensitive search (default: false)
+    - `search_target` (enum, optional): Target stream to search - 'stdout', 'stderr', or 'both' (default: 'both')
+  - Returns session output or structured search results with matching lines and line numbers
+  - Enhanced Features:
+    - **Text Pattern Search**: Find specific text in terminal output with intelligent escaping
+    - **Regex Pattern Search**: Advanced pattern matching with full regex support
+    - **Search Target Selection**: Search stdout, stderr, or both streams independently
+    - **Case Sensitivity Control**: Toggle case-sensitive or case-insensitive searching
+    - **Structured Results**: Returns match count, line numbers, and matching text for easy parsing
+    - **Backward Compatibility**: Maintains full compatibility when no search parameters provided
+  - Security: Read-only access to session output with comprehensive input validation
 
 - **list_sessions**
   - List all active terminal sessions
@@ -218,6 +240,220 @@ src/
     - `max_results` (number, optional): Maximum number of results
   - Returns search results with file paths, line numbers, and context
   - Security: Search confined to allowed directories
+
+### 🔧 Package Management Tools
+
+- **npm_install**
+  - Install npm dependencies with automatic lock file management and security validation
+  - Inputs:
+    - `packages` (string[], optional): Specific packages to install (if empty, installs from package.json)
+    - `dev` (boolean, optional): Install as development dependencies
+    - `global` (boolean, optional): Install packages globally
+    - `exact` (boolean, optional): Install exact versions
+  - Returns installation status and dependency tree information
+  - Security: Validates package.json and prevents malicious package installation
+
+- **npm_scripts**
+  - Execute package.json scripts with real-time output streaming
+  - Inputs:
+    - `script` (string, required): Script name from package.json
+    - `args` (string[], optional): Additional arguments to pass to the script
+  - Returns script execution output and exit status
+  - Security: Validates script existence and monitors execution
+
+- **npm_audit**
+  - Perform security vulnerability scanning of npm dependencies
+  - Returns detailed vulnerability report with severity levels and remediation suggestions
+  - Security: Identifies and reports security vulnerabilities in the dependency tree
+
+- **npm_outdated**
+  - Check for package updates and version compatibility
+  - Returns list of outdated packages with current, wanted, and latest versions
+  - Security: Helps maintain up-to-date dependencies with security patches
+
+- **pip_install**
+  - Install Python packages with virtual environment support
+  - Inputs:
+    - `packages` (string[], required): Python packages to install
+    - `requirements_file` (string, optional): Install from requirements.txt
+    - `user` (boolean, optional): Install to user site-packages
+    - `upgrade` (boolean, optional): Upgrade existing packages
+  - Returns installation status and package information
+  - Security: Validates package sources and manages dependencies safely
+
+- **dependency_info**
+  - Show detailed information about installed packages
+  - Inputs:
+    - `package` (string, required): Package name to analyze
+    - `package_manager` (enum, required): 'npm' or 'pip'
+  - Returns comprehensive package metadata, dependencies, and security information
+  - Security: Provides transparency into package dependencies and potential risks
+
+### 🌐 Network & API Tools
+
+- **check_port**
+  - Check what services are running on specific network ports
+  - Inputs:
+    - `port` (number, required): Port number to check
+    - `host` (string, optional): Host to check (defaults to localhost)
+  - Returns service information and connection status
+  - Security: Network reconnaissance confined to localhost and specified hosts
+
+- **http_request**
+  - Make HTTP requests for API testing and development
+  - Inputs:
+    - `url` (string, required): Target URL for the request
+    - `method` (enum, optional): HTTP method (GET, POST, PUT, DELETE, etc.)
+    - `headers` (object, optional): Request headers
+    - `body` (string, optional): Request body for POST/PUT requests
+    - `timeout` (number, optional): Request timeout in milliseconds
+  - Returns response status, headers, and body
+  - Security: Validates URLs and prevents requests to internal/sensitive endpoints
+
+- **localhost_services**
+  - Detect and list local development servers and services
+  - Returns comprehensive list of running local services with ports and process information
+  - Security: Scans only localhost interfaces and common development ports
+
+- **ping_host**
+  - Test network connectivity to specified hosts
+  - Inputs:
+    - `host` (string, required): Hostname or IP address to ping
+    - `count` (number, optional): Number of ping packets to send
+  - Returns connectivity status and response times
+  - Security: Validates hostnames and prevents network abuse
+
+- **dns_lookup**
+  - Perform DNS resolution for development domains and troubleshooting
+  - Inputs:
+    - `hostname` (string, required): Domain name to resolve
+    - `record_type` (enum, optional): DNS record type (A, AAAA, MX, TXT, etc.)
+  - Returns DNS resolution results and record information
+  - Security: Validates domain names and prevents DNS enumeration attacks
+
+### 🔍 Code Analysis Tools
+
+- **lint_code**
+  - Run code linters (ESLint, Pylint, etc.) for code quality analysis
+  - Inputs:
+    - `path` (string, required): File or directory to lint
+    - `linter` (enum, optional): Specific linter to use (auto-detected by default)
+    - `fix` (boolean, optional): Automatically fix linting issues
+    - `config` (string, optional): Path to custom linter configuration
+  - Returns linting results with issues, warnings, and suggestions
+  - Security: Validates file paths and linter configurations
+
+- **format_code**
+  - Format code using tools like Prettier, Black, or language-specific formatters
+  - Inputs:
+    - `path` (string, required): File or directory to format
+    - `formatter` (enum, optional): Specific formatter to use (auto-detected by default)
+    - `config` (string, optional): Path to formatter configuration
+  - Returns formatting results and any issues encountered
+  - Security: Validates file paths and formatter configurations
+
+- **code_metrics**
+  - Analyze code complexity, lines of code, and other metrics
+  - Inputs:
+    - `path` (string, required): File or directory to analyze
+    - `include_tests` (boolean, optional): Include test files in analysis
+  - Returns detailed code metrics including complexity, maintainability index, and technical debt
+  - Security: Confined to allowed directories with comprehensive validation
+
+- **find_duplicates**
+  - Detect copy-paste code and structural duplicates
+  - Inputs:
+    - `path` (string, required): Directory to scan for duplicates
+    - `min_lines` (number, optional): Minimum lines for duplicate detection
+    - `language` (string, optional): Programming language for syntax-aware detection
+  - Returns list of duplicate code blocks with locations and similarity scores
+  - Security: Validates scan directories and prevents excessive resource usage
+
+- **type_check**
+  - Perform TypeScript/mypy type validation and analysis
+  - Inputs:
+    - `path` (string, required): File or directory to type check
+    - `strict` (boolean, optional): Enable strict type checking mode
+    - `config` (string, optional): Path to type checker configuration
+  - Returns type checking results with errors, warnings, and suggestions
+  - Security: Validates configuration files and prevents malicious type definitions
+
+### 📁 File Monitoring Tools
+
+- **watch_files**
+  - Monitor file changes with pattern matching and real-time notifications
+  - Inputs:
+    - `path` (string, required): Directory or file to watch
+    - `patterns` (string[], optional): Glob patterns for files to watch
+    - `ignore_patterns` (string[], optional): Patterns to ignore
+    - `recursive` (boolean, optional): Watch subdirectories recursively
+  - Returns real-time file change events with timestamps and change types
+  - Security: Confined to allowed directories with resource usage limits
+
+- **tail_logs**
+  - Real-time log file monitoring with filtering and highlighting
+  - Inputs:
+    - `file` (string, required): Log file to monitor
+    - `lines` (number, optional): Number of initial lines to display
+    - `filter` (string, optional): Filter pattern for log entries
+  - Returns streaming log content with real-time updates
+  - Security: Validates log file paths and prevents excessive memory usage
+
+- **directory_watch**
+  - Comprehensive directory change tracking with detailed event information
+  - Inputs:
+    - `path` (string, required): Directory to monitor
+    - `recursive` (boolean, optional): Monitor subdirectories
+    - `events` (string[], optional): Specific events to track (create, modify, delete, move)
+  - Returns detailed directory change events with file metadata
+  - Security: Resource-limited monitoring with path validation
+
+- **file_diff**
+  - Compare file contents and track changes over time
+  - Inputs:
+    - `file1` (string, required): First file to compare
+    - `file2` (string, required): Second file to compare
+    - `context_lines` (number, optional): Lines of context around changes
+  - Returns detailed diff with additions, deletions, and modifications
+  - Security: Validates file paths and prevents large file processing abuse
+
+### 🧪 Testing Tools
+
+- **run_tests**
+  - Execute test suites (Jest, pytest, etc.) with comprehensive reporting
+  - Inputs:
+    - `test_runner` (enum, optional): Test framework to use (auto-detected by default)
+    - `path` (string, optional): Specific test files or directories
+    - `pattern` (string, optional): Test name pattern to match
+    - `coverage` (boolean, optional): Enable code coverage reporting
+  - Returns test results with pass/fail status, execution times, and coverage data
+  - Security: Validates test configurations and prevents malicious test execution
+
+- **test_coverage**
+  - Generate detailed code coverage reports with multiple output formats
+  - Inputs:
+    - `path` (string, optional): Directory to analyze coverage for
+    - `format` (enum, optional): Output format (html, json, lcov, text)
+    - `threshold` (number, optional): Minimum coverage threshold
+  - Returns coverage statistics and detailed reports
+  - Security: Validates paths and prevents unauthorized file access
+
+- **test_watch**
+  - Continuous testing with file monitoring and automatic test execution
+  - Inputs:
+    - `watch_paths` (string[], optional): Directories to watch for changes
+    - `test_pattern` (string, optional): Pattern for test files to execute
+  - Returns continuous test results with change detection and execution status
+  - Security: Resource-limited watching with path validation
+
+- **benchmark**
+  - Performance testing and profiling for code optimization
+  - Inputs:
+    - `target` (string, required): Function, file, or command to benchmark
+    - `iterations` (number, optional): Number of benchmark iterations
+    - `warmup` (number, optional): Warmup iterations before measurement
+  - Returns performance metrics including execution time, memory usage, and statistical analysis
+  - Security: Validates benchmark targets and prevents resource exhaustion
 
 ### Utility Tools
 
@@ -247,6 +483,11 @@ npm run watch
 npm run test:filesystem
 npm run test:process  
 npm run test:terminal
+npm run test:package-management
+npm run test:network-api
+npm run test:code-analysis
+npm run test:file-monitoring
+npm run test:testing
 ```
 
 ### Development Advantages

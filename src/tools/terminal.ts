@@ -2,7 +2,7 @@
 import { FastMCP, UserError } from "fastmcp";
 import { z } from "zod";
 import { spawn, ChildProcess } from 'child_process';
-import path from "path";
+import * as path from "path";
 import { validatePath } from "../utils/security.js";
 
 /**
@@ -77,6 +77,20 @@ function cleanupSession(sessionId: string): void {
 
   // Remove session from storage
   terminalSessions.delete(sessionId);
+}
+
+/**
+ * CONTRACT: Clear all terminal sessions (for testing purposes)
+ * 
+ * Preconditions: None
+ * Postconditions: All sessions cleaned up and removed
+ * Invariants: No resource leaks after cleanup
+ */
+export function clearAllTerminalSessions(): void {
+  for (const sessionId of terminalSessions.keys()) {
+    cleanupSession(sessionId);
+  }
+  terminalSessions.clear();
 }
 
 /**
@@ -184,7 +198,7 @@ export function registerTerminalTools(server: FastMCP) {
         childProcess.stdout?.on('data', (data) => {
           const session = terminalSessions.get(sessionId);
           if (session) {
-            session.outputBuffer += data.toString();
+            session.outputBuffer += data ? data.toString() : '';
             session.lastActivity = new Date();
           }
         });
@@ -192,7 +206,7 @@ export function registerTerminalTools(server: FastMCP) {
         childProcess.stderr?.on('data', (data) => {
           const session = terminalSessions.get(sessionId);
           if (session) {
-            session.errorBuffer += data.toString();
+            session.errorBuffer += data ? data.toString() : '';
             session.lastActivity = new Date();
           }
         });
@@ -299,25 +313,45 @@ export function registerTerminalTools(server: FastMCP) {
     },
   });
 
-  // TOOL: read_output - Session output streaming with buffer management
+  // TOOL: read_output - Session output streaming with buffer management and search functionality
   server.addTool({
     name: "read_output",
-    description: `Read new output from a running terminal session.`,
+    description: `Read new output from a running terminal session. Can optionally search the output for a text or regex pattern.`,
     parameters: z.object({
-      pid: z.number().int().positive().describe('The session ID (process ID) to read output from')
+      pid: z.number().int().positive().describe('The session ID (process ID) to read output from'),
+      search_pattern: z.string().optional().describe('A text or regex pattern to search for in the output. If provided, the output will be filtered to only show matching lines.'),
+      is_regex: z.boolean().optional().default(false).describe('Set to true if search_pattern is a regular expression. Defaults to false.'),
+      case_sensitive: z.boolean().optional().default(false).describe('Set to true for a case-sensitive search. Defaults to false.'),
+      search_target: z.enum(['stdout', 'stderr', 'both']).optional().default('both').describe("Specifies which output stream to search: 'stdout', 'stderr', or 'both'. Defaults to 'both'.")
     }),
     execute: async (args, { log }) => {
-      const { pid } = args;
+      const { pid, search_pattern, is_regex, case_sensitive, search_target } = args;
 
-      // DEFENSIVE PROGRAMMING: PID validation (treated as sessionId for terminal sessions)
-      const sessionId = `session_${pid}`;
-      
-      // Find session by partial ID match (since we generate our own session IDs)
+      // DEFENSIVE PROGRAMMING: Parameter validation with contracts
+      // CONTRACT: PID must be positive integer
+      if (!Number.isInteger(pid) || pid <= 0) {
+        throw new UserError('PID must be a positive integer');
+      }
+
+      // CONTRACT: Search pattern validation when provided
+      if (search_pattern !== undefined) {
+        if (typeof search_pattern !== 'string') {
+          throw new UserError('Search pattern must be a string');
+        }
+        if (search_pattern.length === 0) {
+          throw new UserError('Search pattern cannot be empty');
+        }
+        if (search_pattern.length > 1000) {
+          throw new UserError('Search pattern exceeds maximum length (1000 characters)');
+        }
+      }
+
+      // DEFENSIVE PROGRAMMING: Find session by partial ID match (since we generate our own session IDs)
       let matchingSession: TerminalSession | undefined;
       let matchingSessionId: string | undefined;
       
       for (const [id, session] of terminalSessions.entries()) {
-        if (id.includes(pid.toString()) || session.process.pid === pid) {
+        if (id.includes(String(pid)) || session.process.pid === pid) {
           matchingSession = session;
           matchingSessionId = id;
           break;
@@ -329,37 +363,120 @@ export function registerTerminalTools(server: FastMCP) {
       }
 
       try {
-        // CONTRACT: Read current output state
         const currentTime = new Date();
-        const output = matchingSession.outputBuffer;
-        const error = matchingSession.errorBuffer;
-        const isActive = matchingSession.isActive;
+        matchingSession.lastActivity = currentTime; // Update last activity time
 
-        // Update last activity time
-        matchingSession.lastActivity = currentTime;
+        // IMMUTABILITY: Build search result without modifying session state
+        if (!search_pattern) {
+          // **Behavior without search pattern (current functionality)**
+          log.info('Reading full session output', { sessionId: matchingSessionId });
+          const response = {
+            sessionId: matchingSessionId,
+            pid: matchingSession.process.pid,
+            output: matchingSession.outputBuffer.trim(),
+            error: matchingSession.errorBuffer.trim(),
+            isActive: matchingSession.isActive,
+            lastActivity: matchingSession.lastActivity.toISOString(),
+            exitCode: matchingSession.exitCode,
+            exitSignal: matchingSession.exitSignal,
+            timestamp: currentTime.toISOString(),
+          };
+          return JSON.stringify(response, null, 2);
+        } else {
+          // **Behavior WITH search pattern**
+          log.info('Searching session output', { sessionId: matchingSessionId, pattern: search_pattern });
 
-        log.info('Reading session output', {
-          sessionId: matchingSessionId,
-          outputLength: output.length,
-          errorLength: error.length,
-          isActive
-        });
+          // PURE FUNCTION: Determine content to search based on target
+          const determineSearchContent = (target: string, outputBuffer: string, errorBuffer: string): string => {
+            // CONTRACT: Function must handle all valid search targets
+            switch (target) {
+              case 'stdout':
+                return outputBuffer;
+              case 'stderr':
+                return errorBuffer;
+              case 'both':
+                return `--- STDOUT ---\n${outputBuffer}\n--- STDERR ---\n${errorBuffer}`;
+              default:
+                // This should never happen due to Zod validation
+                throw new UserError(`Invalid search target: ${target}`);
+            }
+          };
 
-        const response = {
-          sessionId: matchingSessionId,
-          pid: matchingSession.process.pid,
-          output: output.trim(),
-          error: error.trim(),
-          isActive,
-          lastActivity: matchingSession.lastActivity.toISOString(),
-          exitCode: matchingSession.exitCode,
-          exitSignal: matchingSession.exitSignal,
-          timestamp: currentTime.toISOString(),
-        };
+          const contentToSearch = determineSearchContent(
+            search_target, 
+            matchingSession.outputBuffer, 
+            matchingSession.errorBuffer
+          );
 
-        return JSON.stringify(response, null, 2);
+          // DEFENSIVE PROGRAMMING: Safe regex creation with error handling
+          let regex: RegExp;
+          try {
+            const flags = case_sensitive ? 'g' : 'gi';
+            const pattern = is_regex ? search_pattern : search_pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            regex = new RegExp(pattern, flags);
+          } catch (regexError: any) {
+            throw new UserError(`Invalid search pattern: ${regexError.message}`);
+          }
 
+          // PURE FUNCTION: Search for matches with line information
+          const findMatches = (content: string, searchRegex: RegExp): Array<{line_number: number, text: string}> => {
+            // CONTRACT: Function must return array of matches with valid line numbers
+            const lines = content.split('\n');
+            const matches: Array<{line_number: number, text: string}> = [];
+
+            for (let i = 0; i < lines.length; i++) {
+              // Reset regex lastIndex for global searches
+              searchRegex.lastIndex = 0;
+              if (searchRegex.test(lines[i])) {
+                matches.push({
+                  line_number: i + 1,
+                  text: lines[i]
+                });
+              }
+            }
+
+            return matches;
+          };
+
+          const matches = findMatches(contentToSearch, regex);
+
+          // CONTRACT: Build comprehensive search response
+          const response = {
+            sessionId: matchingSessionId,
+            pid: matchingSession.process.pid,
+            isActive: matchingSession.isActive,
+            search_results: {
+              pattern: search_pattern,
+              is_regex: is_regex,
+              case_sensitive: case_sensitive,
+              search_target: search_target,
+              match_count: matches.length,
+              matches: matches
+            },
+            timestamp: currentTime.toISOString(),
+          };
+
+          // POSTCONDITION: Verify response structure integrity
+          if (response.search_results.match_count !== matches.length) {
+            throw new UserError('Internal error: match count inconsistency');
+          }
+
+          log.info('Search completed', {
+            sessionId: matchingSessionId,
+            pattern: search_pattern.substring(0, 50),
+            matchCount: matches.length,
+            isRegex: is_regex,
+            caseSensitive: case_sensitive,
+            searchTarget: search_target
+          });
+
+          return JSON.stringify(response, null, 2);
+        }
       } catch (error: any) {
+        // DEFENSIVE PROGRAMMING: Comprehensive error handling
+        if (error instanceof UserError) {
+          throw error;
+        }
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         throw new UserError(`Failed to read session output: ${errorMessage}`);
       }
@@ -453,7 +570,7 @@ export function registerTerminalTools(server: FastMCP) {
       let matchingSessionId: string | undefined;
       
       for (const [id, session] of terminalSessions.entries()) {
-        if (id.includes(pid.toString()) || session.process.pid === pid) {
+        if (id.includes(String(pid)) || session.process.pid === pid) {
           matchingSession = session;
           matchingSessionId = id;
           break;
@@ -567,7 +684,7 @@ export function registerTerminalTools(server: FastMCP) {
         const fs = await import('fs/promises');
         const stats = await fs.stat(validSearchPath);
         if (!stats.isDirectory()) {
-          throw new UserError(`Search path is not a directory: ${searchPath}`);
+          throw new UserError(`Search path is not a directory`);
         }
       } catch (error: any) {
         if (error instanceof UserError) {
@@ -576,7 +693,8 @@ export function registerTerminalTools(server: FastMCP) {
         if (error.code === 'ENOENT') {
           throw new UserError(`Search path does not exist: ${searchPath}`);
         }
-        throw new UserError(`Cannot access search path: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        throw new UserError(`Cannot access search path: ${errorMessage}`);
       }
 
       log.info('Starting code search', {
@@ -595,11 +713,11 @@ export function registerTerminalTools(server: FastMCP) {
         const rgArgs = [
           '--json',
           '--sort', 'path',
-          '--max-count', maxResults.toString(),
+          '--max-count', String(maxResults),
         ];
 
         if (contextLines > 0) {
-          rgArgs.push('--context', contextLines.toString());
+          rgArgs.push('--context', String(contextLines));
         }
 
         if (ignoreCase) {
@@ -618,7 +736,7 @@ export function registerTerminalTools(server: FastMCP) {
         rgArgs.push(pattern, validSearchPath);
 
         // Execute ripgrep search
-        const { spawn } = await import('child_process');
+        // Note: Using spawn from top-level import for better testability
         const rgProcess = spawn('rg', rgArgs, {
           stdio: ['pipe', 'pipe', 'pipe'],
           cwd: validSearchPath,
@@ -628,11 +746,11 @@ export function registerTerminalTools(server: FastMCP) {
         let errorBuffer = '';
 
         rgProcess.stdout?.on('data', (data) => {
-          outputBuffer += data.toString();
+          outputBuffer += data ? data.toString() : '';
         });
 
         rgProcess.stderr?.on('data', (data) => {
-          errorBuffer += data.toString();
+          errorBuffer += data ? data.toString() : '';
         });
 
         // Wait for completion or timeout
@@ -713,11 +831,25 @@ export function registerTerminalTools(server: FastMCP) {
         return JSON.stringify(response, null, 2);
 
       } catch (error: any) {
-        if (error.code === 'ENOENT') {
+        if (error instanceof UserError) {
+          throw error;
+        }
+        if (error?.code === 'ENOENT') {
           throw new UserError('ripgrep (rg) command not found. Please install ripgrep to use code search functionality.');
         }
         
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        // DEFENSIVE PROGRAMMING: Simplified safe error message extraction
+        let errorMessage = 'Unknown error';
+        try {
+          if (error && error.message) {
+            errorMessage = String(error.message);
+          } else if (error) {
+            errorMessage = 'Error occurred without message';
+          }
+        } catch (e) {
+          errorMessage = 'Error processing failed';
+        }
+        
         throw new UserError(`Code search failed: ${errorMessage}`);
       }
     },

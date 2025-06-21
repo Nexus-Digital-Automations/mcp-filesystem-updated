@@ -373,7 +373,18 @@ export class FilesystemBenchmark {
       throw new UserError("Estimated memory usage exceeds safety limit (1GB)");
     }
 
-    return validationResult.data as BenchmarkConfig;
+    // DEFENSIVE PROGRAMMING: Safe type conversion preserving branded types
+    const validatedData = validationResult.data;
+    return {
+      operationName: validatedData.operationName,
+      iterations: validatedData.iterations as IterationCount,
+      concurrency: validatedData.concurrency as ConcurrencyLevel,
+      fileSizes: validatedData.fileSizes as unknown as readonly FileSize[],
+      warmupIterations: validatedData.warmupIterations as IterationCount,
+      cooldownDelayMs: validatedData.cooldownDelayMs,
+      timeoutMs: validatedData.timeoutMs,
+      cleanup: validatedData.cleanup,
+    };
   }
 
   /**

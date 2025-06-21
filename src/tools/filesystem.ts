@@ -1,10 +1,10 @@
 // src/tools/filesystem.ts
 import { FastMCP, UserError } from "fastmcp";
 import { z } from "zod";
-import fs from "fs/promises";
-import path from "path";
+import * as fs from "fs/promises";
+import * as path from "path";
 import { glob } from 'glob';
-import { createTwoFilesPatch } from 'diff';
+import { createTwoFilesPatch, diffLines } from 'diff';
 import { validatePath, validatePaths } from "../utils/security.js";
 import { PathArgumentSchema, getPathFromOptions, validatePathOptions } from "../utils/path-helpers.js";
 
@@ -24,6 +24,68 @@ function normalizeLineEndings(text: string): string {
     throw new UserError('Text must be a string for line ending normalization');
   }
   return text.replace(/\r\n/g, '\n');
+}
+
+/**
+ * IMMUTABILITY: Pure function for string similarity calculation using Levenshtein distance
+ * 
+ * Preconditions:
+ * - str1 and str2 must be strings
+ * - function is deterministic and pure
+ * 
+ * Postconditions:
+ * - Returns similarity score between 0 and 1 (1 = identical, 0 = completely different)
+ * - No side effects on input parameters
+ * 
+ * Invariants:
+ * - Similarity calculation is symmetric: calculateStringSimilarity(a, b) === calculateStringSimilarity(b, a)
+ * - Empty strings return 0 similarity unless both are empty (then 1)
+ * - Identical strings return 1
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+  // DEFENSIVE PROGRAMMING: Input validation
+  if (typeof str1 !== 'string' || typeof str2 !== 'string') {
+    throw new UserError('Both inputs must be strings for similarity calculation');
+  }
+  
+  // Handle edge cases
+  if (str1 === str2) return 1;
+  if (str1.length === 0 || str2.length === 0) return 0;
+  
+  // Convert to lowercase for case-insensitive comparison
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+  
+  // Calculate Levenshtein distance
+  const matrix: number[][] = [];
+  const len1 = s1.length;
+  const len2 = s2.length;
+  
+  // Initialize matrix
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+  
+  // Fill matrix
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,      // deletion
+        matrix[i][j - 1] + 1,      // insertion
+        matrix[i - 1][j - 1] + cost // substitution
+      );
+    }
+  }
+  
+  const distance = matrix[len1][len2];
+  const maxLength = Math.max(len1, len2);
+  
+  // Convert distance to similarity score (0-1)
+  return maxLength === 0 ? 1 : (maxLength - distance) / maxLength;
 }
 
 /**
@@ -56,22 +118,25 @@ function createUnifiedDiff(originalContent: string, newContent: string, filepath
 }
 
 /**
- * CONTRACT: Advanced file editing function with comprehensive validation
+ * CONTRACT: Advanced file editing function with comprehensive validation and context-based matching
  * 
  * Preconditions:
  * - filePath must be validated and accessible
  * - edits must be non-empty array with valid edit objects
  * - dryRun must be boolean
+ * - context conditions (before/after) must be valid strings when provided
  * 
  * Postconditions:
  * - File is modified according to edits (unless dryRun=true)
  * - Returns formatted diff showing all changes
  * - Original file preserved on any error
+ * - Context conditions properly evaluated when specified
  * 
  * Invariants:
  * - Edit operations are applied sequentially
  * - File integrity maintained throughout process
  * - Error conditions result in no file modification
+ * - Context matching preserves semantic intent
  */
 async function applyFileEdits(
   filePath: string,
@@ -80,6 +145,10 @@ async function applyFileEdits(
     newText?: string;
     old_string?: string;
     new_string?: string;
+    context?: {
+      before?: string;
+      after?: string;
+    };
   }>,
   dryRun = false
 ): Promise<string> {
@@ -119,7 +188,7 @@ async function applyFileEdits(
       continue;
     }
 
-    // Flexible line-by-line matching with indentation preservation
+    // Flexible line-by-line matching with indentation preservation and context validation
     const oldLines = normalizedOld.split('\n');
     const contentLines = modifiedContent.split('\n');
     let matchFound = false;
@@ -132,6 +201,33 @@ async function applyFileEdits(
       });
 
       if (isMatch) {
+        // DEFENSIVE PROGRAMMING: Context validation if specified
+        if (edit.context) {
+          let contextMatch = true;
+          
+          // Check before context
+          if (edit.context.before) {
+            const beforeLine = i > 0 ? contentLines[i - 1] : undefined;
+            if (!beforeLine || !beforeLine.includes(edit.context.before)) {
+              contextMatch = false;
+            }
+          }
+          
+          // Check after context
+          if (edit.context.after) {
+            const afterLineIndex = i + oldLines.length;
+            const afterLine = afterLineIndex < contentLines.length ? contentLines[afterLineIndex] : undefined;
+            if (!afterLine || !afterLine.includes(edit.context.after)) {
+              contextMatch = false;
+            }
+          }
+          
+          // Skip this match if context doesn't match
+          if (!contextMatch) {
+            continue;
+          }
+        }
+
         const originalIndent = contentLines[i].match(/^\s*/)?.[0] || '';
         const newLines = normalizedNew.split('\n').map((line, j) => {
           if (j === 0) return originalIndent + line.trimStart();
@@ -152,7 +248,77 @@ async function applyFileEdits(
     }
 
     if (!matchFound) {
-      throw new UserError(`Could not find exact or flexible match for edit at index ${index}:\n${normalizedOld}`);
+      // FUZZY MATCHING: Use diff library to find similar lines
+      const contentLines = modifiedContent.split('\n');
+      const searchLines = normalizedOld.split('\n');
+      
+      // Find lines with character-level similarity using diff
+      const diffResult = diffLines(normalizedOld, modifiedContent);
+      
+      // Extract similar lines that were changed or removed
+      const similarLines: string[] = [];
+      const contextLines: string[] = [];
+      
+      for (const part of diffResult) {
+        if (part.removed || part.added) {
+          const lines = part.value.trim().split('\n').filter(line => line.trim().length > 0);
+          if (part.removed) {
+            // These are lines that were "removed" which means they exist in search but not in content
+            // We want lines that are similar to our search
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (trimmedLine.length > 0) {
+                contextLines.push(`Expected: ${trimmedLine}`);
+              }
+            }
+          } else if (part.added) {
+            // These are lines that were "added" which means they exist in content but not in search
+            // These are potential matches
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (trimmedLine.length > 0) {
+                similarLines.push(trimmedLine);
+              }
+            }
+          }
+        }
+      }
+      
+      // Look for close matches using simple string similarity
+      const allContentLines = contentLines.map(line => line.trim()).filter(line => line.length > 0);
+      const searchLine = searchLines[0]?.trim() || normalizedOld.trim();
+      
+      if (searchLine.length > 0) {
+        const possibleMatches = allContentLines
+          .map(line => ({
+            line,
+            similarity: calculateStringSimilarity(searchLine, line)
+          }))
+          .filter(match => match.similarity > 0.3) // 30% similarity threshold
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, 12); // Top 12 matches
+        
+        for (const match of possibleMatches) {
+          if (!similarLines.includes(match.line)) {
+            similarLines.push(match.line);
+          }
+        }
+      }
+      
+      // Prepare helpful error message with similar lines
+      let errorMessage = `Could not find exact or flexible match for edit at index ${index}:\n${normalizedOld}`;
+      
+      if (similarLines.length > 0) {
+        errorMessage += '\n\nFound similar lines that might be what you\'re looking for:';
+        for (let i = 0; i < Math.min(12, similarLines.length); i++) {
+          errorMessage += `\n${i + 1}. "${similarLines[i]}"`;
+        }
+        errorMessage += '\n\nPlease verify the exact text you want to replace and try again.';
+      } else {
+        errorMessage += '\n\nNo similar lines found. Please check the file content and ensure the text to replace exists.';
+      }
+      
+      throw new UserError(errorMessage);
     }
   }
 
@@ -170,6 +336,210 @@ async function applyFileEdits(
   }
 
   return formattedDiff;
+}
+
+/**
+ * IMMUTABILITY: Pure function for file discovery with glob patterns and advanced ignore handling
+ * 
+ * Preconditions:
+ * - targets must be non-empty array of strings
+ * - all target paths must be validated through security boundaries
+ * - ignorePatterns must be valid array of strings or undefined
+ * 
+ * Postconditions:
+ * - Returns Set of absolute file paths for deduplication
+ * - All returned paths are within allowed directories
+ * - No side effects on input parameters
+ * - Ignored patterns are properly filtered out
+ * 
+ * Invariants:
+ * - File discovery is deterministic for same inputs
+ * - Security boundaries are never violated
+ * - Error isolation prevents one target from affecting others
+ * - Default ignore patterns are always applied
+ */
+async function discoverTargetFiles(
+  targets: string[], 
+  ignorePatterns: string[] = []
+): Promise<Set<string>> {
+  // DEFENSIVE PROGRAMMING: Input validation
+  if (!Array.isArray(targets) || targets.length === 0) {
+    throw new UserError('Targets must be a non-empty array');
+  }
+  
+  if (targets.length > 500) {
+    throw new UserError('Maximum 500 targets allowed for bulk operations');
+  }
+  
+  for (const [index, target] of targets.entries()) {
+    if (typeof target !== 'string' || target.trim().length === 0) {
+      throw new UserError(`Target at index ${index} must be a non-empty string`);
+    }
+  }
+  
+  if (!Array.isArray(ignorePatterns)) {
+    throw new UserError('ignorePatterns must be an array');
+  }
+  
+  if (ignorePatterns.length > 200) {
+    throw new UserError('Maximum 200 ignore patterns allowed');
+  }
+  
+  // DEFAULT IGNORE PATTERNS: Common directories and files to automatically exclude
+  const defaultIgnorePatterns = [
+    // Version control
+    '**/.git/**',
+    '**/.svn/**',
+    '**/.hg/**',
+    
+    // Dependencies and packages
+    '**/node_modules/**',
+    '**/bower_components/**',
+    '**/vendor/**',
+    '**/packages/**/*.min.js',
+    
+    // Python environments and caches
+    '**/.venv/**',
+    '**/venv/**',
+    '**/env/**',
+    '**/__pycache__/**',
+    '**/*.pyc',
+    '**/.pytest_cache/**',
+    
+    // Build outputs
+    '**/dist/**',
+    '**/build/**',
+    '**/out/**',
+    '**/target/**',
+    '**/bin/**',
+    '**/obj/**',
+    
+    // IDE and editor files
+    '**/.vscode/**',
+    '**/.idea/**',
+    '**/*.swp',
+    '**/*.swo',
+    '**/*~',
+    
+    // System files
+    '**/.DS_Store',
+    '**/Thumbs.db',
+    '**/desktop.ini',
+    
+    // Logs and temporary files
+    '**/logs/**',
+    '**/*.log',
+    '**/tmp/**',
+    '**/temp/**',
+    '**/*.tmp',
+    '**/*.temp',
+    
+    // Coverage and test outputs
+    '**/coverage/**',
+    '**/.nyc_output/**',
+    '**/test-results/**',
+    
+    // Hidden files (can be overridden)
+    '**/.*'
+  ];
+  
+  // IMMUTABILITY: Combine default and user patterns
+  const allIgnorePatterns = [...defaultIgnorePatterns, ...ignorePatterns];
+  
+  // IMMUTABILITY: Use Set for automatic deduplication
+  const allTargetFiles = new Set<string>();
+  
+  // DEFENSIVE PROGRAMMING: Process each target with error isolation
+  const discoveryResults = await Promise.allSettled(
+    targets.map(async (target) => {
+      try {
+        const validTarget = await validatePath(target);
+        const stats = await fs.stat(validTarget).catch(() => null);
+        
+        const targetFiles = new Set<string>();
+        
+        if (stats?.isFile()) {
+          // Direct file target - check if it should be ignored using glob patterns
+          let shouldIgnore = false;
+          for (const pattern of allIgnorePatterns) {
+            try {
+              // Use glob to test if file matches ignore pattern
+              const matches = await glob(pattern, { 
+                absolute: true,
+                dot: true,
+                cwd: path.dirname(validTarget)
+              });
+              if (matches.includes(validTarget)) {
+                shouldIgnore = true;
+                break;
+              }
+            } catch {
+              // Skip invalid patterns
+              continue;
+            }
+          }
+          
+          if (!shouldIgnore) {
+            targetFiles.add(validTarget);
+          }
+        } else if (stats?.isDirectory()) {
+          // Directory target - find all files recursively with ignore patterns
+          const files = await glob('**/*', { 
+            cwd: validTarget, 
+            nodir: true, 
+            absolute: true,
+            dot: true,
+            ignore: allIgnorePatterns
+          });
+          for (const file of files) {
+            targetFiles.add(file);
+          }
+        } else {
+          // Assume it's a glob pattern
+          const files = await glob(target, { 
+            nodir: true, 
+            absolute: true,
+            dot: true,
+            ignore: allIgnorePatterns
+          });
+          for (const file of files) {
+            // SECURITY BOUNDARY: Validate each discovered file
+            try {
+              const validFile = await validatePath(file);
+              targetFiles.add(validFile);
+            } catch (e) {
+              // Skip files outside allowed directories
+              continue;
+            }
+          }
+        }
+        
+        return targetFiles;
+        
+      } catch (error) {
+        // Return empty set for failed targets (error isolation)
+        return new Set<string>();
+      }
+    })
+  );
+  
+  // IMMUTABILITY: Merge all successful discovery results
+  for (const result of discoveryResults) {
+    if (result.status === 'fulfilled') {
+      for (const file of result.value) {
+        allTargetFiles.add(file);
+      }
+    }
+  }
+  
+  // CONTRACT: Postcondition verification
+  for (const filePath of allTargetFiles) {
+    if (!path.isAbsolute(filePath)) {
+      throw new UserError(`Postcondition violated: non-absolute path discovered: ${filePath}`);
+    }
+  }
+  
+  return allTargetFiles;
 }
 
 /**
@@ -233,7 +603,10 @@ export function registerFilesystemTools(server: FastMCP) {
     description: `Completely replace file contents. Best for large changes (>20% of file) or when edit_block fails. Use with caution as it will overwrite existing files. Only works within allowed directories. IMPORTANT: Always use absolute paths (starting with '/' or drive letter like 'C:\\') for reliability. Relative paths may fail as they depend on the current working directory. Tilde paths (~/...) might not work in all contexts. Unless the user explicitly asks for relative paths, use absolute paths.`,
     parameters: z.object({
       content: z.string().describe('The complete content to write to the file'),
-    }).merge(PathArgumentSchema),
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -285,7 +658,11 @@ export function registerFilesystemTools(server: FastMCP) {
   server.addTool({
     name: "create_directory",
     description: `Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. Only works within allowed directories. IMPORTANT: Always use absolute paths (starting with '/' or drive letter like 'C:\\') for reliability. Relative paths may fail as they depend on the current working directory. Tilde paths (~/...) might not work in all contexts. Unless the user explicitly asks for relative paths, use absolute paths.`,
-    parameters: PathArgumentSchema,
+    parameters: z.object({
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -336,7 +713,11 @@ export function registerFilesystemTools(server: FastMCP) {
   server.addTool({
     name: "get_file_info",
     description: `Retrieve detailed metadata about a file or directory including size, creation time, last modified time, permissions, and type. Only works within allowed directories. IMPORTANT: Always use absolute paths (starting with '/' or drive letter like 'C:\\') for reliability. Relative paths may fail as they depend on the current working directory. Tilde paths (~/...) might not work in all contexts. Unless the user explicitly asks for relative paths, use absolute paths.`,
-    parameters: PathArgumentSchema,
+    parameters: z.object({
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -453,9 +834,17 @@ Security: Can only read files within pre-configured allowed directories.`,
       paths: z.array(z.string()).min(1, "At least one path must be provided").max(50, "Maximum 50 files can be read at once"),
     }),
     execute: async (args, { log }) => {
-      // DEFENSIVE PROGRAMMING: Input validation
+      // DEFENSIVE PROGRAMMING: Comprehensive input validation
       if (!Array.isArray(args.paths)) {
         throw new UserError("Paths must be provided as an array");
+      }
+      
+      if (args.paths.length === 0) {
+        throw new UserError("At least one path must be provided");
+      }
+      
+      if (args.paths.length > 50) {
+        throw new UserError("Maximum 50 files can be read at once");
       }
       
       for (const [index, filePath] of args.paths.entries()) {
@@ -597,7 +986,10 @@ Output: Returns the **entire content** of the file *after* the new content has b
 Security: Can only append to files within pre-configured allowed directories.`,
     parameters: z.object({
       content: z.string().describe('The text content to append to the file'),
-    }).merge(PathArgumentSchema),
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -687,8 +1079,11 @@ Security: This tool can only operate on files within the pre-configured allowed 
       }).refine(data => !(data.oldText !== undefined && data.old_string !== undefined) && !(data.newText !== undefined && data.new_string !== undefined), {
         message: "Cannot provide both 'oldText' and 'old_string' (or 'newText' and 'new_string') in the same edit",
       })).min(1, "At least one edit operation must be provided"),
-      dryRun: z.boolean().default(false).describe('Preview changes using git-style diff format')
-    }).merge(PathArgumentSchema),
+      dryRun: z.boolean().default(false).describe('Preview changes using git-style diff format'),
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -730,6 +1125,240 @@ Security: This tool can only operate on files within the pre-configured allowed 
     },
   });
 
+  // TOOL: bulk_edit - Advanced multi-file editing with context-based matching and intelligent ignore patterns
+  server.addTool({
+    name: "bulk_edit", 
+    description: `Performs bulk find-and-replace operations across multiple files and directories with optional context-based matching and advanced ignore patterns.
+Arguments:
+* \`targets\` (array, required): An array of strings specifying the files, folders, or glob patterns to apply edits to.
+* \`edits\` (array, required): An array of edit objects, each with:
+    * \`oldText\` (string, required): The text to search for.
+    * \`newText\` (string, required): The replacement text.
+    * \`context\` (object, optional): Specifies context-based matching rules.
+        * \`before\` (string, optional): The edit will only be applied if the line immediately preceding the match contains this text.
+        * \`after\` (string, optional): The edit will only be applied if the line immediately following the match contains this text.
+    * \`conditions\` (object, optional): Advanced conditional logic for when to apply this edit.
+        * \`and\` (array, optional): All conditions must be true (file path contains all specified strings).
+        * \`or\` (array, optional): At least one condition must be true (file path contains at least one specified string).
+        * \`not\` (array, optional): None of these conditions should be true (file path contains none of specified strings).
+* \`ignorePatterns\` (array, optional): Additional glob patterns to ignore beyond the default patterns. Default patterns automatically exclude common directories like node_modules, .git, .venv, dist, etc.
+* \`dryRun\` (boolean, optional, default: false): If true, returns a diff of the changes without saving them.
+Output: Returns a comprehensive diff showing all changes across all matched files with file-by-file breakdown.
+Security: Can only operate on files within pre-configured allowed directories. Supports up to 100,000 files with intelligent filtering and performance optimizations.`,
+    parameters: z.object({
+      targets: z.array(z.string().min(1, "Target cannot be empty")).min(1, "At least one target must be provided").max(500, "Maximum 500 targets allowed"),
+      edits: z.array(z.object({
+        oldText: z.string().min(1, "oldText cannot be empty"),
+        newText: z.string(),
+        context: z.object({
+          before: z.string().optional(),
+          after: z.string().optional(),
+        }).optional(),
+        conditions: z.object({
+          and: z.array(z.string()).optional().describe("All conditions must match (file path contains all strings)"),
+          or: z.array(z.string()).optional().describe("At least one condition must match (file path contains any string)"),
+          not: z.array(z.string()).optional().describe("None of these conditions should match (file path contains none of these strings)"),
+        }).optional(),
+      })).min(1, "At least one edit operation must be provided").max(100, "Maximum 100 edit operations allowed"),
+      ignorePatterns: z.array(z.string()).optional().default([]).describe("Additional patterns to ignore beyond default patterns"),
+      dryRun: z.boolean().default(false),
+    }),
+    execute: async (args, { log }) => {
+      const { targets, edits, ignorePatterns = [], dryRun } = args;
+      
+      // DEFENSIVE PROGRAMMING: Comprehensive input validation
+      if (edits.some(edit => edit.oldText.length > 50000)) {
+        throw new UserError('Edit search text exceeds maximum length (50,000 characters)');
+      }
+      
+      if (edits.some(edit => edit.newText.length > 50000)) {
+        throw new UserError('Edit replacement text exceeds maximum length (50,000 characters)');
+      }
+      
+      log.info(`Starting bulk edit operation`, {
+        targetCount: targets.length,
+        editCount: edits.length,
+        ignorePatternCount: ignorePatterns.length,
+        dryRun
+      });
+      
+      // IMMUTABILITY: Discover all target files with ignore patterns
+      const allTargetFiles = await discoverTargetFiles(targets, ignorePatterns);
+      const finalFiles = Array.from(allTargetFiles);
+      
+      if (finalFiles.length === 0) {
+        throw new UserError('No files found matching the specified targets after applying ignore patterns');
+      }
+      
+      if (finalFiles.length > 100000) {
+        throw new UserError(`Too many files discovered (${finalFiles.length}). Maximum 100,000 files allowed for bulk operations.`);
+      }
+      
+      log.info(`Found ${finalFiles.length} files to process for bulk edit`);
+      
+      // PERFORMANCE OPTIMIZATION: Process files in batches for very large operations
+      const BATCH_SIZE = 1000;
+      const batches = [];
+      for (let i = 0; i < finalFiles.length; i += BATCH_SIZE) {
+        batches.push(finalFiles.slice(i, i + BATCH_SIZE));
+      }
+      
+      let allDiffs = '';
+      let filesChanged = 0;
+      let totalErrors = 0;
+      let totalProcessed = 0;
+      
+      // DEFENSIVE PROGRAMMING: Process files in batches with comprehensive error handling
+      for (const [batchIndex, batch] of batches.entries()) {
+        log.info(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+        
+        const batchResults = await Promise.allSettled(
+          batch.map(async (file) => {
+            try {
+              // SECURITY BOUNDARY: Re-validate each file path
+              const validFile = await validatePath(file);
+              
+              // Verify file is still accessible and is a regular file
+              const stats = await fs.stat(validFile);
+              if (!stats.isFile()) {
+                throw new UserError(`Not a regular file: ${file}`);
+              }
+              
+              // CONDITIONAL LOGIC: Filter edits based on file path conditions
+              const applicableEdits = edits.filter(edit => {
+                if (!edit.conditions) return true;
+                
+                const filePath = file.toLowerCase();
+                
+                // AND logic: All conditions must be true
+                if (edit.conditions.and && edit.conditions.and.length > 0) {
+                  const allMatch = edit.conditions.and.every(condition => 
+                    filePath.includes(condition.toLowerCase())
+                  );
+                  if (!allMatch) return false;
+                }
+                
+                // OR logic: At least one condition must be true
+                if (edit.conditions.or && edit.conditions.or.length > 0) {
+                  const anyMatch = edit.conditions.or.some(condition => 
+                    filePath.includes(condition.toLowerCase())
+                  );
+                  if (!anyMatch) return false;
+                }
+                
+                // NOT logic: None of these conditions should be true
+                if (edit.conditions.not && edit.conditions.not.length > 0) {
+                  const noneMatch = edit.conditions.not.every(condition => 
+                    !filePath.includes(condition.toLowerCase())
+                  );
+                  if (!noneMatch) return false;
+                }
+                
+                return true;
+              });
+              
+              // Skip file if no edits apply
+              if (applicableEdits.length === 0) {
+                return {
+                  file,
+                  diff: '',
+                  success: true,
+                  hasChanges: false,
+                  skipped: true
+                };
+              }
+              
+              // Apply applicable edits with context support
+              const diff = await applyFileEdits(validFile, applicableEdits, dryRun);
+              
+              // Check if any changes were made
+              if (diff.includes('---') || diff.includes('+++')) {
+                return {
+                  file,
+                  diff,
+                  success: true,
+                  hasChanges: true,
+                  appliedEditCount: applicableEdits.length
+                };
+              } else {
+                return {
+                  file,
+                  diff: '',
+                  success: true,
+                  hasChanges: false,
+                  appliedEditCount: applicableEdits.length
+                };
+              }
+              
+            } catch (error: any) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              log.warn(`Failed to edit file: ${file}`, { error: errorMessage });
+              
+              return {
+                file,
+                diff: '',
+                success: false,
+                error: errorMessage
+              };
+            }
+          })
+        );
+        
+        // IMMUTABILITY: Collect batch results
+        const batchFileResults = batchResults.map(result => result.status === 'fulfilled' ? result.value : null)
+          .filter((result): result is NonNullable<typeof result> => result !== null);
+        
+        for (const result of batchFileResults) {
+          totalProcessed++;
+          
+          if (result.success && result.hasChanges) {
+            allDiffs += `\n\n━━━ CHANGES FOR ${result.file} ━━━\n${result.diff}`;
+            filesChanged++;
+          } else if (!result.success) {
+            allDiffs += `\n\n━━━ ERROR FOR ${result.file} ━━━\n${result.error}\n`;
+            totalErrors++;
+          }
+        }
+        
+        // PERFORMANCE OPTIMIZATION: Add small delay between batches for very large operations
+        if (batches.length > 10 && batchIndex < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      
+      // CONTRACT: Postcondition verification
+      if (totalProcessed !== finalFiles.length) {
+        throw new UserError('Postcondition violated: not all files were processed');
+      }
+      
+      // Generate comprehensive summary with advanced statistics
+      const action = dryRun ? 'previewed' : 'applied';
+      const summary = [
+        `Bulk edit ${action} successfully:`,
+        `  • Files discovered: ${finalFiles.length}`,
+        `  • Files processed: ${totalProcessed}`,
+        `  • Files with changes: ${filesChanged}`,
+        `  • Files with errors: ${totalErrors}`,
+        `  • Edit operations: ${edits.length}`,
+        `  • Conditional logic: ${edits.some(e => e.conditions) ? 'enabled' : 'disabled'}`,
+        `  • Context-based matching: ${edits.some(e => e.context) ? 'enabled' : 'disabled'}`,
+        `  • Custom ignore patterns: ${ignorePatterns.length}`,
+        `  • Processing batches: ${batches.length}`
+      ].join('\n');
+      
+      log.info('Bulk edit operation completed', {
+        filesDiscovered: finalFiles.length,
+        filesProcessed: totalProcessed,
+        filesChanged,
+        errors: totalErrors,
+        batches: batches.length,
+        dryRun
+      });
+      
+      return summary + (allDiffs.length > 0 ? '\n\n' + allDiffs : '\n\nNo changes were made to any files.');
+    },
+  });
+
   // TOOL: directory_tree - ASCII tree generation with pure function implementation
   server.addTool({
     name: "directory_tree",
@@ -743,7 +1372,11 @@ Output: Returns a compact ASCII tree string representing the directory structure
   * Clean, readable format that preserves visual structure and relationships
 The output format is much more compact and human-readable than JSON while preserving all structural information.
 Security: Can only inspect directories within pre-configured allowed directories.`,
-    parameters: PathArgumentSchema,
+    parameters: z.object({
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);
@@ -848,7 +1481,11 @@ Arguments:
 * \`path\` / \`file_path\` / \`filepath\` (string, required): The full path of the file to be deleted. Provide exactly one of these.
 Output: Returns a success message indicating the path of the file that was deleted.
 Security: Can only delete files within pre-configured allowed directories. The file must exist and be a regular file (not a directory).`,
-    parameters: PathArgumentSchema,
+    parameters: z.object({
+      path: z.string().optional().describe('The primary path for the operation.'),
+      file_path: z.string().optional().describe('Alternative argument for the path.'),
+      filepath: z.string().optional().describe('Alternative argument for the path.')
+    }),
     execute: async (args, { log }) => {
       const pathToUse = getPathFromOptions(args);
       const validPath = await validatePath(pathToUse);

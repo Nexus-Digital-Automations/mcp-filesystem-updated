@@ -6,12 +6,12 @@ import { UserError } from "fastmcp";
  * CONTRACT: Shared Zod schema for path arguments
  * 
  * Preconditions:
- * - Schema accepts exactly one of the three path variants
- * - All path variants are optional strings
+ * - Schema accepts optional string fields for path variants
+ * - Business logic validation handled separately in getPathFromOptions
  * 
  * Postconditions:
- * - Validates exactly one path argument is provided
  * - Returns valid schema object for FastMCP tool usage
+ * - Allows schema-level validation to pass, function-level validation handles business rules
  * 
  * Invariants:
  * - Schema structure remains consistent across all tools
@@ -46,8 +46,8 @@ export function getPathFromOptions(data: z.infer<typeof PathArgumentSchema>): st
     throw new UserError("Path options data must be a valid object.");
   }
 
-  // DEFENSIVE PROGRAMMING: Count provided paths
-  const providedPaths = [data.path, data.file_path, data.filepath].filter(Boolean);
+  // DEFENSIVE PROGRAMMING: Count provided paths (including empty strings)
+  const providedPaths = [data.path, data.file_path, data.filepath].filter(p => p !== undefined);
   const providedCount = providedPaths.length;
   
   // CONTRACT: Exactly one path must be provided
@@ -58,7 +58,7 @@ export function getPathFromOptions(data: z.infer<typeof PathArgumentSchema>): st
   if (providedCount > 1) {
     throw new UserError("Only one of 'path', 'file_path', or 'filepath' can be provided at a time.");
   }
-  
+
   // DEFENSIVE PROGRAMMING: Extract the actual path
   const actualPath = data.path ?? data.file_path ?? data.filepath;
   
@@ -67,10 +67,12 @@ export function getPathFromOptions(data: z.infer<typeof PathArgumentSchema>): st
     throw new UserError("Path could not be determined from provided options.");
   }
   
+  // DEFENSIVE PROGRAMMING: Type validation
   if (typeof actualPath !== 'string') {
     throw new UserError("Path must be a string value.");
   }
   
+  // DEFENSIVE PROGRAMMING: Empty string validation
   if (actualPath.trim().length === 0) {
     throw new UserError("Path cannot be empty or whitespace-only.");
   }

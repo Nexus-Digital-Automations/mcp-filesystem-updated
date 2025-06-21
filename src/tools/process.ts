@@ -77,16 +77,32 @@ export function registerProcessTools(server: FastMCP) {
             return null;
           }
 
-          return {
+          // Build process object with only defined properties
+          const processData: any = {
             pid: proc.pid,
             name: typeof proc.name === 'string' ? proc.name : 'unknown',
             command: typeof proc.cmd === 'string' ? proc.cmd : '',
-            parentPid: typeof proc.ppid === 'number' ? proc.ppid : undefined,
-            userId: typeof proc.uid === 'number' ? proc.uid : undefined,
-            cpuUsage: typeof proc.cpu === 'number' ? Number(proc.cpu.toFixed(2)) : undefined,
-            memoryUsage: typeof proc.memory === 'number' ? Number(proc.memory.toFixed(2)) : undefined,
-            memoryUsageFormatted: typeof proc.memory === 'number' ? formatMemory(proc.memory) : undefined,
           };
+
+          // Only add optional properties if they have valid values
+          if (typeof proc.ppid === 'number') {
+            processData.parentPid = proc.ppid;
+          }
+          
+          if (typeof proc.uid === 'number') {
+            processData.userId = proc.uid;
+          }
+          
+          if (typeof proc.cpu === 'number') {
+            processData.cpuUsage = Number(proc.cpu.toFixed(2));
+          }
+          
+          if (typeof proc.memory === 'number') {
+            processData.memoryUsage = Number(proc.memory.toFixed(2));
+            processData.memoryUsageFormatted = formatMemory(proc.memory);
+          }
+
+          return processData;
         }).filter(proc => proc !== null); // Remove invalid entries
 
         // CONTRACT: Postcondition verification
@@ -156,7 +172,7 @@ export function registerProcessTools(server: FastMCP) {
       }
 
       // SECURITY BOUNDARY: Protect critical system processes
-      const protectedPids = [0, 1]; // kernel and init process
+      const protectedPids = [1]; // init process (PID 0 already filtered out by positive integer check)
       if (protectedPids.includes(pid)) {
         throw new UserError(`Cannot terminate protected system process with PID ${pid}`);
       }

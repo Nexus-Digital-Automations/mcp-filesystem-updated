@@ -25,6 +25,11 @@
     "test:filesystem": "jest --testPathPattern=filesystem",
     "test:process": "jest --testPathPattern=process",
     "test:terminal": "jest --testPathPattern=terminal",
+    "test:package-management": "jest --testPathPattern=package-management",
+    "test:network-api": "jest --testPathPattern=network-api",
+    "test:code-analysis": "jest --testPathPattern=code-analysis",
+    "test:file-monitoring": "jest --testPathPattern=file-monitoring",
+    "test:testing-tools": "jest --testPathPattern=testing-tools",
     "test:utils": "jest --testPathPattern=utils",
     "test:integration": "jest --testPathPattern=integration",
     "test:property": "jest --testPathPattern=property-based"

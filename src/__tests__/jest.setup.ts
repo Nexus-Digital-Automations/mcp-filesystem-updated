@@ -1,9 +1,15 @@
-// src/__tests__/jest.setup.js
+// src/__tests__/jest.setup.ts
 // Mock fastmcp at the global level for Jest compatibility
+
+// TypeScript global augmentation for test utilities
+declare global {
+  var mockUserError: new (message: string) => Error;
+  var createMockFs: () => any;
+}
 
 // Mock fastmcp UserError class
 global.mockUserError = class extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'UserError';
   }
