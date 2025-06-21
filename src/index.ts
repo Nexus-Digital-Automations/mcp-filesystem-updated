@@ -52,6 +52,7 @@ This server provides three main categories of tools:
 - File reading, writing, copying, moving, and deletion
 - Directory creation, listing, and tree visualization  
 - Advanced file editing with diff generation
+- Bulk enterprise-scale editing with conditional logic
 - Powerful search capabilities with glob patterns
 - Comprehensive metadata retrieval
 

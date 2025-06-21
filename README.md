@@ -144,6 +144,21 @@ src/
     - `dryRun` (boolean): Preview changes without applying (default: false)
   - Returns detailed diff and match information
 
+- **bulk_edit** ⭐ *Enterprise Scale*
+  - Performs bulk find-and-replace operations across thousands of files with a single command.
+  - Features:
+    - Supports up to 100,000 files with intelligent batch processing.
+    - Advanced conditional logic (AND/OR/NOT) to precisely target files based on their path.
+    - Built-in and custom ignore patterns (`node_modules`, `.git`, etc. are ignored by default).
+    - Context-aware matching (e.g., only edit if the preceding line contains specific text).
+    - Dry-run mode to preview changes before applying them.
+  - Inputs:
+    - `targets` (array): Files, folders, or glob patterns to edit.
+    - `edits` (array): A list of find-and-replace operations with optional conditions and context.
+    - `ignorePatterns` (array, optional): Additional patterns to ignore.
+    - `dryRun` (boolean, optional): Preview changes without saving.
+  - Returns a comprehensive diff of all changes across all modified files.
+
 - **directory_tree**
   - Generate a compact ASCII tree representation of directory structure
   - Input: `path` / `file_path` / `filepath` (string): Directory location

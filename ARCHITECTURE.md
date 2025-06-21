@@ -260,6 +260,7 @@ server.addTool({
 - `append_file`: Safe file appending with path validation alternatives
 - `copy_file`: Secure file copying with triple path validation and overwrite protection
 - `edit_file`: Advanced text editing with flexible matching and diff generation
+- `bulk_edit`: ⭐ **Enterprise Showcase** - Bulk editing with conditional logic and ignore patterns
 - `directory_tree`: ASCII tree generation with pure function implementation
 - `delete_file`: Safe file deletion with comprehensive validation
 - `rename_file`: ⭐ **Advanced Programming Showcase** - Enterprise-grade file operations
